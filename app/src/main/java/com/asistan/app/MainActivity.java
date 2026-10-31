@@ -1,7 +1,10 @@
 package com.asistan.app;
 
 import android.Manifest;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -37,6 +40,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
 
     private static final String UYANDIRMA = "bilgisayar";
     private static final Locale TR = new Locale("tr", "TR");
+    private static final long SOHBET_SURESI = 20000;
 
     private Model model;
     private SpeechService speechService;
@@ -45,8 +49,8 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     private Button dugme;
     private Button sesDugme;
     private boolean dinliyor = false;
-    private boolean komutBekliyor = false;
-    private long bekleBitis = 0;
+    private boolean sohbetModu = false;
+    private long sonEtkilesim = 0;
     private final Random rnd = new Random();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<Voice> sesler = new ArrayList<>();
@@ -191,6 +195,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
                 speechService = null;
             }
             dinliyor = false;
+            sohbetModu = false;
             dugme.setText("Dinlemeyi Başlat");
             durum.setText("Kapalı.");
         } else {
@@ -207,39 +212,46 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         }
     }
 
-    private void konus(String metin) {
-        durum.setText(metin);
+    private void konus(String duyulan, String metin) {
+        durum.setText("Duydum: " + duyulan + "\n\n" + metin);
         if (speechService != null) speechService.setPause(true);
         tts.speak(metin, TextToSpeech.QUEUE_FLUSH, null, "cevap");
     }
 
     private void devamEt() {
+        sonEtkilesim = System.currentTimeMillis();
         handler.postDelayed(() -> {
             if (speechService != null && dinliyor) {
                 speechService.reset();
                 speechService.setPause(false);
             }
         }, 500);
+        handler.postDelayed(() -> {
+            if (sohbetModu && System.currentTimeMillis() - sonEtkilesim >= SOHBET_SURESI) {
+                sohbetModu = false;
+                durum.setText("Sohbet bitti. ('" + UYANDIRMA + "' de)");
+            }
+        }, SOHBET_SURESI + 500);
     }
 
     private void isle(String metin) {
         if (metin == null || metin.trim().isEmpty()) return;
         String m = metin.toLowerCase(TR).replace("bilgi sayar", "bilgisayar");
-        boolean beklemede = komutBekliyor && System.currentTimeMillis() < bekleBitis;
+
+        if (sohbetModu && System.currentTimeMillis() - sonEtkilesim >= SOHBET_SURESI) {
+            sohbetModu = false;
+        }
 
         if (m.contains(UYANDIRMA)) {
             String komut = m.substring(m.indexOf(UYANDIRMA) + UYANDIRMA.length()).trim();
+            sohbetModu = true;
             if (komut.isEmpty()) {
-                komutBekliyor = true;
-                bekleBitis = System.currentTimeMillis() + 8000;
-                konus(sec(EFENDIM));
+                konus(metin, sec(EFENDIM));
             } else {
-                komutBekliyor = false;
-                komutCalistir(komut);
+                komutCalistir(metin, komut);
             }
-        } else if (beklemede) {
-            komutBekliyor = false;
-            komutCalistir(m);
+        } else if (sohbetModu) {
+            komutCalistir(metin, m);
         } else {
             durum.setText("Yok saydım: " + metin);
         }
@@ -250,28 +262,48 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         return false;
     }
 
-    private void komutCalistir(String m) {
-        if (icerir(m, "saat kaç", "saati söyle", "saat ne")) {
+    private String sarjBilgisi() {
+        Intent i = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (i == null) return "Pil bilgisini alamadım.";
+        int seviye = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+        int olcek = i.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+        int fis = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0);
+        if (seviye < 0 || olcek <= 0) return "Pil bilgisini alamadım.";
+        int yuzde = seviye * 100 / olcek;
+        return "Şarjın yüzde " + yuzde + (fis != 0 ? ", şarj oluyor." : ".");
+    }
+
+    private void komutCalistir(String duyulan, String m) {
+        if (icerir(m, "görüşürüz", "sohbeti bitir", "sohbeti kapat", "sus", "yeter")) {
+            sohbetModu = false;
+            konus(duyulan, "Tamam.");
+        } else if (icerir(m, "şarj", "pil", "batarya")) {
+            konus(duyulan, laf(sarjBilgisi()));
+        } else if (icerir(m, "saat")) {
             Calendar c = Calendar.getInstance();
             int s = c.get(Calendar.HOUR_OF_DAY);
             int d = c.get(Calendar.MINUTE);
             String zaman = d == 0 ? "tam " + s : s + " " + d;
-            konus(laf("Saat " + zaman + "."));
-        } else if (icerir(m, "tarih", "bugün günlerden", "hangi gün", "bugün ayın")) {
+            konus(duyulan, laf("Saat " + zaman + "."));
+        } else if (icerir(m, "tarih", "günlerden", "hangi gün", "ayın kaçı")) {
             String t = new SimpleDateFormat("d MMMM EEEE", TR).format(new Date());
-            konus(laf("Bugün " + t + "."));
+            konus(duyulan, laf("Bugün " + t + "."));
         } else if (icerir(m, "merhaba", "selam", "günaydın", "iyi akşamlar")) {
-            konus(laf("Merhaba."));
+            konus(duyulan, laf("Merhaba."));
         } else if (icerir(m, "nasılsın", "naber", "ne haber")) {
-            konus(laf("İyiyim. Bir telefonun içinde olabildiğim kadar."));
+            konus(duyulan, laf("İyiyim. Bir telefonun içinde olabildiğim kadar."));
         } else if (icerir(m, "adın ne", "ismin ne", "sen kimsin")) {
-            konus("Bilgisayar. İsmi sen koydun.");
+            konus(duyulan, "Bilgisayar. İsmi sen koydun.");
         } else if (icerir(m, "şaka", "güldür", "espri")) {
-            konus(sec(SAKALAR));
+            konus(duyulan, sec(SAKALAR));
         } else if (icerir(m, "teşekkür", "sağ ol", "sağol")) {
-            konus(sec(TESEKKUR));
+            konus(duyulan, sec(TESEKKUR));
         } else {
-            konus(sec(ANLAMADIM));
+            if (sohbetModu && m.trim().split("\\s+").length < 2) {
+                durum.setText("Yok saydım: " + duyulan);
+                return;
+            }
+            konus(duyulan, sec(ANLAMADIM));
         }
     }
 
