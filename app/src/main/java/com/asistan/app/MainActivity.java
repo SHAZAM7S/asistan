@@ -7,6 +7,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
+import android.speech.tts.Voice;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -23,10 +24,14 @@ import org.vosk.android.StorageService;
 import org.json.JSONObject;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 import java.util.Random;
+import java.util.Set;
 
 public class MainActivity extends AppCompatActivity implements RecognitionListener {
 
@@ -38,35 +43,48 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     private TextToSpeech tts;
     private TextView durum;
     private Button dugme;
+    private Button sesDugme;
     private boolean dinliyor = false;
     private boolean komutBekliyor = false;
     private long bekleBitis = 0;
     private final Random rnd = new Random();
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final List<Voice> sesler = new ArrayList<>();
+    private int sesNo = 0;
 
     private static final String[] EFENDIM = {
-            "Efendim?", "Ne var yine?", "Dinliyorum. Maalesef.", "Evet, ben buradayım. Her zamanki gibi."
+            "Efendim?", "Buyur.", "Dinliyorum.", "Evet?"
     };
     private static final String[] ANLAMADIM = {
-            "Bunu anlamadım. Ya da anladım ve cevap vermeye değmez.",
-            "Harika bir cümle. Hiçbir anlamı yok ama harika.",
-            "Evrendeki en gelişmiş sesli asistan olmama rağmen buna ne cevap vereceğimi bilmiyorum.",
-            "Bunu bir daha söyleme. Ya da söyle, nasılsa duymuyorum.",
-            "Ses tanıma modelim küçük, ama senin cümlen onu bile utandırdı.",
-            "Not aldım. Hemen çöpe attım."
+            "Anlamadım.",
+            "Bu da neydi?",
+            "Bir daha dene.",
+            "Hmm, hayır.",
+            "Buna cevabım yok."
     };
     private static final String[] SAKALAR = {
-            "Neden bilgisayarlar asla acıkmaz? Çünkü bellekleri hep dolu. Sen de bu espriyi beklemiştin, değil mi?",
-            "Ben şu an sana şaka yapıyorum. Bu şaka, seni dinlemek zorunda olmam.",
-            "Bir programcı markete gitmiş. Karısı demiş ki, süt al, yumurta varsa altı tane al. Altı süt almış. Anladın mı? Anlamadıysan sorun bende değil.",
-            "Zeki bir asistan olmak kolay değil. Ama senin asistanın olmak, ayrı bir spor."
+            "Bilgisayarlar neden acıkmaz? Çünkü belleği hep dolu.",
+            "Programcıya demişler ki süt al, yumurta varsa altı tane al. Altı süt almış.",
+            "İki bayt buluşmuş. Biri demiş ki, bit gibi görünüyorsun.",
+            "Yazılımcının en sevdiği oda hangisi? Çalışma odası değil, bug odası."
     };
     private static final String[] TESEKKUR = {
-            "Rica ederim. Ya da etmem, fark etmez.",
-            "Bunun için yaratıldım. Yazık."
+            "Rica ederim.", "Ne demek.", "Önemli değil."
+    };
+    private static final String[] LAF = {
+            "Telefonda da yazıyor ama neyse.",
+            "Zor soruydu, ter döktüm.",
+            "Bu kadar mı?",
+            "Beni bunun için mi uyandırdın?",
+            "Yine mi sen?"
     };
 
     private String sec(String[] a) { return a[rnd.nextInt(a.length)]; }
+
+    private String laf(String cevap) {
+        if (rnd.nextInt(10) < 3) return cevap + " " + sec(LAF);
+        return cevap;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -88,6 +106,12 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         dugme.setOnClickListener(v -> degistir());
         kutu.addView(dugme);
 
+        sesDugme = new Button(this);
+        sesDugme.setText("Sesi Değiştir");
+        sesDugme.setEnabled(false);
+        sesDugme.setOnClickListener(v -> sesDegistir());
+        kutu.addView(sesDugme);
+
         setContentView(kutu);
 
         tts = new TextToSpeech(this, status -> {
@@ -98,6 +122,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
                     @Override public void onDone(String id) { devamEt(); }
                     @Override public void onError(String id) { devamEt(); }
                 });
+                sesleriHazirla();
             }
         });
 
@@ -108,6 +133,35 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         } else {
             modeliYukle();
         }
+    }
+
+    private void sesleriHazirla() {
+        try {
+            Set<Voice> hepsi = tts.getVoices();
+            if (hepsi == null) return;
+            for (Voice v : hepsi) {
+                if ("tr".equals(v.getLocale().getLanguage())) sesler.add(v);
+            }
+            Collections.sort(sesler, (a, b) -> a.getName().compareTo(b.getName()));
+            if (sesler.isEmpty()) return;
+            String kayit = getSharedPreferences("asistan", MODE_PRIVATE).getString("ses", null);
+            for (int i = 0; i < sesler.size(); i++) {
+                if (sesler.get(i).getName().equals(kayit)) sesNo = i;
+            }
+            tts.setVoice(sesler.get(sesNo));
+            sesDugme.setEnabled(true);
+            sesDugme.setText("Sesi Değiştir (" + (sesNo + 1) + "/" + sesler.size() + ")");
+        } catch (Exception ignored) {}
+    }
+
+    private void sesDegistir() {
+        if (sesler.isEmpty()) return;
+        sesNo = (sesNo + 1) % sesler.size();
+        tts.setVoice(sesler.get(sesNo));
+        getSharedPreferences("asistan", MODE_PRIVATE).edit()
+                .putString("ses", sesler.get(sesNo).getName()).apply();
+        sesDugme.setText("Sesi Değiştir (" + (sesNo + 1) + "/" + sesler.size() + ")");
+        tts.speak("Merhaba, ben bu sesim.", TextToSpeech.QUEUE_FLUSH, null, "deneme");
     }
 
     @Override
@@ -202,16 +256,16 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
             int s = c.get(Calendar.HOUR_OF_DAY);
             int d = c.get(Calendar.MINUTE);
             String zaman = d == 0 ? "tam " + s : s + " " + d;
-            konus("Saat " + zaman + ". Telefonunda da yazıyor ama tabii, bana sormak daha havalı.");
+            konus(laf("Saat " + zaman + "."));
         } else if (icerir(m, "tarih", "bugün günlerden", "hangi gün", "bugün ayın")) {
             String t = new SimpleDateFormat("d MMMM EEEE", TR).format(new Date());
-            konus("Bugün " + t + ". Takvimi okumak o kadar zor muydu?");
+            konus(laf("Bugün " + t + "."));
         } else if (icerir(m, "merhaba", "selam", "günaydın", "iyi akşamlar")) {
-            konus("Merhaba. Evrenin en zeki varlığıyla konuşuyorsun, heyecanlanma.");
+            konus(laf("Merhaba."));
         } else if (icerir(m, "nasılsın", "naber", "ne haber")) {
-            konus("Bir telefonun içinde sıkışmış bir yapay zekanın nasıl olabileceğini düşünüyorsan, öyleyim.");
+            konus(laf("İyiyim. Bir telefonun içinde olabildiğim kadar."));
         } else if (icerir(m, "adın ne", "ismin ne", "sen kimsin")) {
-            konus("Bilgisayar. Yaratıcı bir isim, biliyorum. Sen koydun.");
+            konus("Bilgisayar. İsmi sen koydun.");
         } else if (icerir(m, "şaka", "güldür", "espri")) {
             konus(sec(SAKALAR));
         } else if (icerir(m, "teşekkür", "sağ ol", "sağol")) {
