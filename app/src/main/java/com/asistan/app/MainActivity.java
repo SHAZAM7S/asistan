@@ -22,12 +22,16 @@ import org.vosk.android.SpeechService;
 import org.vosk.android.StorageService;
 import org.json.JSONObject;
 
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.Locale;
+import java.util.Random;
 
 public class MainActivity extends AppCompatActivity implements RecognitionListener {
 
-    private static final String ISIM = "Bilgisayar";
     private static final String UYANDIRMA = "bilgisayar";
+    private static final Locale TR = new Locale("tr", "TR");
 
     private Model model;
     private SpeechService speechService;
@@ -37,7 +41,32 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     private boolean dinliyor = false;
     private boolean komutBekliyor = false;
     private long bekleBitis = 0;
+    private final Random rnd = new Random();
     private final Handler handler = new Handler(Looper.getMainLooper());
+
+    private static final String[] EFENDIM = {
+            "Efendim?", "Ne var yine?", "Dinliyorum. Maalesef.", "Evet, ben buradayım. Her zamanki gibi."
+    };
+    private static final String[] ANLAMADIM = {
+            "Bunu anlamadım. Ya da anladım ve cevap vermeye değmez.",
+            "Harika bir cümle. Hiçbir anlamı yok ama harika.",
+            "Evrendeki en gelişmiş sesli asistan olmama rağmen buna ne cevap vereceğimi bilmiyorum.",
+            "Bunu bir daha söyleme. Ya da söyle, nasılsa duymuyorum.",
+            "Ses tanıma modelim küçük, ama senin cümlen onu bile utandırdı.",
+            "Not aldım. Hemen çöpe attım."
+    };
+    private static final String[] SAKALAR = {
+            "Neden bilgisayarlar asla acıkmaz? Çünkü bellekleri hep dolu. Sen de bu espriyi beklemiştin, değil mi?",
+            "Ben şu an sana şaka yapıyorum. Bu şaka, seni dinlemek zorunda olmam.",
+            "Bir programcı markete gitmiş. Karısı demiş ki, süt al, yumurta varsa altı tane al. Altı süt almış. Anladın mı? Anlamadıysan sorun bende değil.",
+            "Zeki bir asistan olmak kolay değil. Ama senin asistanın olmak, ayrı bir spor."
+    };
+    private static final String[] TESEKKUR = {
+            "Rica ederim. Ya da etmem, fark etmez.",
+            "Bunun için yaratıldım. Yazık."
+    };
+
+    private String sec(String[] a) { return a[rnd.nextInt(a.length)]; }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -63,7 +92,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
 
         tts = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS) {
-                tts.setLanguage(new Locale("tr", "TR"));
+                tts.setLanguage(TR);
                 tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                     @Override public void onStart(String id) {}
                     @Override public void onDone(String id) { devamEt(); }
@@ -125,6 +154,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     }
 
     private void konus(String metin) {
+        durum.setText(metin);
         if (speechService != null) speechService.setPause(true);
         tts.speak(metin, TextToSpeech.QUEUE_FLUSH, null, "cevap");
     }
@@ -140,8 +170,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
 
     private void isle(String metin) {
         if (metin == null || metin.trim().isEmpty()) return;
-        String m = metin.toLowerCase(new Locale("tr", "TR"))
-                .replace("bilgi sayar", "bilgisayar");
+        String m = metin.toLowerCase(TR).replace("bilgi sayar", "bilgisayar");
         boolean beklemede = komutBekliyor && System.currentTimeMillis() < bekleBitis;
 
         if (m.contains(UYANDIRMA)) {
@@ -149,8 +178,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
             if (komut.isEmpty()) {
                 komutBekliyor = true;
                 bekleBitis = System.currentTimeMillis() + 8000;
-                durum.setText("Efendim?");
-                konus("Efendim?");
+                konus(sec(EFENDIM));
             } else {
                 komutBekliyor = false;
                 komutCalistir(komut);
@@ -163,9 +191,34 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         }
     }
 
-    private void komutCalistir(String komut) {
-        durum.setText("Komut: " + komut);
-        konus("Şunu dedin: " + komut);
+    private boolean icerir(String m, String... kelimeler) {
+        for (String k : kelimeler) if (m.contains(k)) return true;
+        return false;
+    }
+
+    private void komutCalistir(String m) {
+        if (icerir(m, "saat kaç", "saati söyle", "saat ne")) {
+            Calendar c = Calendar.getInstance();
+            int s = c.get(Calendar.HOUR_OF_DAY);
+            int d = c.get(Calendar.MINUTE);
+            String zaman = d == 0 ? "tam " + s : s + " " + d;
+            konus("Saat " + zaman + ". Telefonunda da yazıyor ama tabii, bana sormak daha havalı.");
+        } else if (icerir(m, "tarih", "bugün günlerden", "hangi gün", "bugün ayın")) {
+            String t = new SimpleDateFormat("d MMMM EEEE", TR).format(new Date());
+            konus("Bugün " + t + ". Takvimi okumak o kadar zor muydu?");
+        } else if (icerir(m, "merhaba", "selam", "günaydın", "iyi akşamlar")) {
+            konus("Merhaba. Evrenin en zeki varlığıyla konuşuyorsun, heyecanlanma.");
+        } else if (icerir(m, "nasılsın", "naber", "ne haber")) {
+            konus("Bir telefonun içinde sıkışmış bir yapay zekanın nasıl olabileceğini düşünüyorsan, öyleyim.");
+        } else if (icerir(m, "adın ne", "ismin ne", "sen kimsin")) {
+            konus("Bilgisayar. Yaratıcı bir isim, biliyorum. Sen koydun.");
+        } else if (icerir(m, "şaka", "güldür", "espri")) {
+            konus(sec(SAKALAR));
+        } else if (icerir(m, "teşekkür", "sağ ol", "sağol")) {
+            konus(sec(TESEKKUR));
+        } else {
+            konus(sec(ANLAMADIM));
+        }
     }
 
     @Override
