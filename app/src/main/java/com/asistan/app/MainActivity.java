@@ -3,7 +3,10 @@ package com.asistan.app;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -23,12 +26,18 @@ import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity implements RecognitionListener {
 
+    private static final String ISIM = "Bilgisayar";
+    private static final String UYANDIRMA = "bilgisayar";
+
     private Model model;
     private SpeechService speechService;
     private TextToSpeech tts;
     private TextView durum;
     private Button dugme;
     private boolean dinliyor = false;
+    private boolean komutBekliyor = false;
+    private long bekleBitis = 0;
+    private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,6 +64,11 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         tts = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS) {
                 tts.setLanguage(new Locale("tr", "TR"));
+                tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                    @Override public void onStart(String id) {}
+                    @Override public void onDone(String id) { devamEt(); }
+                    @Override public void onError(String id) { devamEt(); }
+                });
             }
         });
 
@@ -103,24 +117,62 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
                 speechService.startListening(this);
                 dinliyor = true;
                 dugme.setText("Dinlemeyi Durdur");
-                durum.setText("Dinliyorum...");
+                durum.setText("Dinliyorum... ('" + UYANDIRMA + "' de)");
             } catch (Exception e) {
                 durum.setText("Hata: " + e.getMessage());
             }
         }
     }
 
-    private void cevapla(String metin) {
+    private void konus(String metin) {
+        if (speechService != null) speechService.setPause(true);
+        tts.speak(metin, TextToSpeech.QUEUE_FLUSH, null, "cevap");
+    }
+
+    private void devamEt() {
+        handler.postDelayed(() -> {
+            if (speechService != null && dinliyor) {
+                speechService.reset();
+                speechService.setPause(false);
+            }
+        }, 500);
+    }
+
+    private void isle(String metin) {
         if (metin == null || metin.trim().isEmpty()) return;
-        durum.setText("Duydum: " + metin);
-        tts.speak("Şunu dedin: " + metin, TextToSpeech.QUEUE_FLUSH, null, "cevap");
+        String m = metin.toLowerCase(new Locale("tr", "TR"))
+                .replace("bilgi sayar", "bilgisayar");
+        boolean beklemede = komutBekliyor && System.currentTimeMillis() < bekleBitis;
+
+        if (m.contains(UYANDIRMA)) {
+            String komut = m.substring(m.indexOf(UYANDIRMA) + UYANDIRMA.length()).trim();
+            if (komut.isEmpty()) {
+                komutBekliyor = true;
+                bekleBitis = System.currentTimeMillis() + 8000;
+                durum.setText("Efendim?");
+                konus("Efendim?");
+            } else {
+                komutBekliyor = false;
+                komutCalistir(komut);
+            }
+        } else if (beklemede) {
+            komutBekliyor = false;
+            komutCalistir(m);
+        } else {
+            durum.setText("Yok saydım: " + metin);
+        }
+    }
+
+    private void komutCalistir(String komut) {
+        durum.setText("Komut: " + komut);
+        konus("Şunu dedin: " + komut);
     }
 
     @Override
     public void onResult(String hypothesis) {
         try {
             JSONObject j = new JSONObject(hypothesis);
-            cevapla(j.optString("text"));
+            isle(j.optString("text"));
         } catch (Exception ignored) {}
     }
 
